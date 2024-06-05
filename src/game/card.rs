@@ -1,8 +1,10 @@
 use std::time::Duration;
 
-use bevy::prelude::{shape::Quad, *};
+use bevy::prelude::*;
 use bevy::utils::{Entry, HashMap, HashSet};
+use bevy_inspector_egui::egui::viewport;
 use bevy_rapier3d::prelude::*;
+use bevy::window::PrimaryWindow;
 
 use crate::game::animate::{AnimateRange, Ease};
 use crate::game::camera::PlayerCamera;
@@ -17,18 +19,18 @@ impl Plugin for CardPlugin {
             .init_resource::<HoverPoint>()
             .init_resource::<StackRoots>()
             .init_resource::<CardData>()
-            .add_system_to_stage(CoreStage::PostUpdate, on_spawn_card)
-            .add_system(collide_cards)
-            .add_system(
+            .add_systems(PostUpdate, on_spawn_card)
+            .add_systems(Update, collide_cards)
+            .add_systems(Update, 
                 select_card
                     .after(crate::game::camera::move_camera)
                     .after(collide_cards),
             )
-            .add_system(move_cards.after(select_card))
-            .add_system(evaluate_stacks.after(move_cards))
-            .add_system(handle_enemies.after(evaluate_stacks))
-            .add_system(combat.after(handle_enemies))
-            .add_system(set_hearts.after(combat));
+            .add_systems(Update, move_cards.after(select_card))
+            .add_systems(Update, evaluate_stacks.after(move_cards))
+            .add_systems(Update, handle_enemies.after(evaluate_stacks))
+            .add_systems(Update, combat.after(handle_enemies))
+            .add_systems(Update, set_hearts.after(combat));
     }
 }
 
@@ -136,10 +138,10 @@ impl CardType {
                 max_health: 1,
                 damage: 1,
             },
-            _ => CardStats {
-                health: 0,
-                max_health: 0,
-                damage: 0,
+            CardType::Log => CardStats {
+                health: 1,
+                max_health: 1,
+                damage: 1,
             },
         }
     }
@@ -158,7 +160,7 @@ pub enum CardClass {
     Enemy,
 }
 
-#[derive(Default, PartialEq, Eq, Copy, Clone)]
+#[derive(Default, PartialEq, Eq, Copy, Clone, Resource)]
 pub enum SelectedCard {
     Some(Entity),
     #[default]
@@ -174,7 +176,7 @@ impl SelectedCard {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub enum HoverPoint {
     Some(Vec3),
     #[default]
@@ -192,7 +194,7 @@ pub struct CardBundle {
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     pub visibility: Visibility,
-    pub computed_visibiltiy: ComputedVisibility,
+    pub computed_visibiltiy: InheritedVisibility,
 }
 
 #[derive(Debug)]
@@ -202,7 +204,7 @@ pub enum StackType {
     Breed { progress_bar: Entity },
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct StackRoots {
     roots: HashMap<Entity, StackType>,
     queued_stack_recomputations: HashSet<Entity>,
@@ -225,6 +227,7 @@ impl Default for CardBundle {
     }
 }
 
+#[derive(Resource)]
 pub struct CardData {
     mesh: Handle<Mesh>,
     portrait_mesh: Handle<Mesh>,
@@ -265,25 +268,13 @@ impl FromWorld for CardData {
         };
         Self {
             mesh: meshes.add(
-                Quad {
-                    size: Vec2::new(Card::ASPECT_RATIO, 1.0),
-                    ..default()
-                }
-                .into(),
+                Rectangle::new(Card::ASPECT_RATIO, 1.0)
             ),
             portrait_mesh: meshes.add(
-                Quad {
-                    size: Vec2::new(Card::ART_ASPECT, 1.0) * 0.65,
-                    ..default()
-                }
-                .into(),
+                Rectangle::new(Card::ART_ASPECT * 0.65, 1.0 * 0.65)
             ),
             heart_mesh: meshes.add(
-                Quad {
-                    size: Vec2::new(HEART_WIDTH, HEART_HEIGHT),
-                    ..default()
-                }
-                .into(),
+                Rectangle::new(HEART_WIDTH, HEART_HEIGHT)
             ),
             villager_portrait_base: materials.add(StandardMaterial {
                 base_color_texture: Some(asset_server.load("villager.png")),
@@ -348,25 +339,26 @@ fn on_spawn_card(
 ) {
     for (entity, card) in &cards {
         commands.entity(entity).with_children(|parent| {
-            parent.spawn_bundle(PbrBundle {
+            parent.spawn(PbrBundle {
                 material: card_data.class_material(card.class()),
                 mesh: card_data.mesh.clone(),
                 ..default()
             });
-            parent.spawn_bundle(PbrBundle {
+            parent.spawn(PbrBundle {
                 material: card_data.portrait_material(card.card_type()),
                 mesh: card_data.portrait_mesh.clone(),
                 transform: Transform::from_xyz(0.0, -0.08, 0.001),
                 ..default()
             });
             parent
-                .spawn_bundle(SpatialBundle::default())
+                .spawn(SpatialBundle::default())
                 .with_children(|parent| {
                     let max = card.info.stats.max_health;
                     let offset = HEART_PANEL_WIDTH / max as f32;
+                    info!("max: {}, offset: {}", max, offset);
                     let width = (max - 1) as f32 * offset;
                     for i in 0..max {
-                        parent.spawn_bundle(PbrBundle {
+                        parent.spawn(PbrBundle {
                             material: card_data.heart_material.clone(),
                             mesh: card_data.heart_mesh.clone(),
                             transform: Transform::from_xyz(
@@ -471,7 +463,7 @@ fn collide_cards(
     transforms: Query<&Transform>,
 ) {
     let mut stack_x_on_y = Vec::new();
-    for collision in collisions.iter() {
+    for collision in collisions.read() {
         match *collision {
             CollisionEvent::Started(e1, e2, _) => {
                 if selected.is_selected(e1) || selected.is_selected(e2) {
@@ -563,9 +555,9 @@ fn find_stack_root(cards: &Query<&Card>, mut current_entity: Entity) -> Entity {
 pub fn select_card(
     mut commands: Commands,
     context: Res<RapierContext>,
-    windows: Res<Windows>,
+    windows: Query<&Window>,
     hovered_tile: Res<HoveredTile>,
-    mouse: Res<Input<MouseButton>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     mut selected_card: ResMut<SelectedCard>,
     mut stack_roots: ResMut<StackRoots>,
     mut hover_point: ResMut<HoverPoint>,
@@ -573,13 +565,14 @@ pub fn select_card(
     mut cards: Query<&mut Card>,
     mut tiles: Query<(&mut Tile, &Transform)>,
 ) {
-    let window = windows.primary();
-    if let Some(mut cursor) = window.cursor_position() {
+    if let Some(mut cursor) = windows.single().cursor_position() {
         let (camera, camera_transform) = cameras.single();
 
         let view = camera_transform.compute_matrix();
 
-        let (viewport_min, viewport_max) = camera.logical_viewport_rect().unwrap();
+        let rect = camera.logical_viewport_rect().unwrap();
+        let viewport_min = rect.min;
+        let viewport_max = rect.max;
         let screen_size = camera.logical_target_size().unwrap();
         let viewport_size = viewport_max - viewport_min;
         let adj_cursor_pos = cursor - Vec2::new(viewport_min.x, screen_size.y - viewport_max.y);
@@ -707,7 +700,7 @@ fn evaluate_stacks(
             commands.entity(root).with_children(|parent| {
                 progress_bar = Some(
                     parent
-                        .spawn_bundle(ProgressBarBundle {
+                        .spawn(ProgressBarBundle {
                             progress_bar: ProgressBar {
                                 current: 0.0,
                                 total: 5.0,
@@ -756,7 +749,7 @@ fn evaluate_stacks(
                     if bar.finished() {
                         commands.entity(*progress_bar).despawn_recursive();
                         if let Ok(transform) = transforms.get(*root) {
-                            commands.spawn_bundle(CardBundle {
+                            commands.spawn(CardBundle {
                                 card: Card {
                                     info: CardType::Villager.into(),
                                     ..default()
@@ -875,7 +868,7 @@ pub fn handle_enemies(time: Res<Time>, mut cards: Query<(Entity, &mut Card, &mut
             card.combat_state = None;
         } else {
             card.combat_state = Some(CombatState {
-                cooldown: Timer::from_seconds(1.0, true),
+                cooldown: Timer::from_seconds(1.0, TimerMode::Once),
                 target,
             });
 
@@ -916,7 +909,7 @@ fn combat(
                     (target_card.info.stats.health - damage as isize).max(0);
                 if target_card.combat_state.is_none() {
                     target_card.combat_state = Some(CombatState {
-                        cooldown: Timer::from_seconds(0.9, true),
+                        cooldown: Timer::from_seconds(0.9, TimerMode::Once),
                         target: entity,
                     });
                 }

@@ -18,11 +18,11 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(CardPlugin)
-            .add_plugin(PlayerCameraPlugin)
-            .add_plugin(ProgressBarPlugin)
-            .add_plugin(TilePlugin)
-            .add_startup_system(setup);
+        app.add_plugins(CardPlugin)
+            .add_plugins(PlayerCameraPlugin)
+            .add_plugins(ProgressBarPlugin)
+            .add_plugins(TilePlugin)
+            .add_systems(Startup, setup);
     }
 }
 
@@ -32,24 +32,24 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    commands.spawn_bundle(CardBundle {
+    commands.spawn(CardBundle {
         transform: Transform::from_xyz(-0.5, 0.0, 0.0),
         card: Card::from(CardType::Villager),
         ..default()
     });
-    commands.spawn_bundle(CardBundle {
+    commands.spawn(CardBundle {
         transform: Transform::from_xyz(0.5, 0.0, 0.0),
         card: Card::from(CardType::Villager),
         ..default()
     });
 
-    // commands.spawn_bundle(CardBundle {
+    // commands.spawn(CardBundle {
     //     transform: Transform::from_xyz(0.0, 3.0, 0.0),
     //     card: Card::from(CardType::Goblin),
     //     ..default()
     // });
 
-    // commands.spawn_bundle(CardBundle {
+    // commands.spawn(CardBundle {
     //     transform: Transform::from_xyz(1.0, 0.0, 0.0),
     //     card: Card {
     //         card_type: CardType::Log,

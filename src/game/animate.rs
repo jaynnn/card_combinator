@@ -1,6 +1,6 @@
 use std::{ops::Range, time::Duration};
 
-use bevy::prelude::Timer;
+use bevy::prelude::{Timer, TimerMode};
 
 pub struct AnimateRange {
     timer: Timer,
@@ -11,7 +11,7 @@ pub struct AnimateRange {
 impl AnimateRange {
     pub fn new(duration: Duration, ease: Ease, range: Range<f32>, repeat: bool) -> Self {
         Self {
-            timer: Timer::new(duration, repeat),
+            timer: Timer::new(duration, TimerMode::Repeating),
             ease,
             range,
         }
@@ -24,7 +24,7 @@ impl AnimateRange {
     }
 
     pub fn percent(&mut self) -> f32 {
-        self.timer.percent()
+        self.timer.elapsed_secs()
     }
 
     pub fn reset(&mut self) {
@@ -41,7 +41,7 @@ impl AnimateRange {
 
     pub fn tick(&mut self, delta: Duration) -> f32 {
         self.timer.tick(delta);
-        let amount = self.ease.ease(self.timer.percent());
+        let amount = self.ease.ease(self.timer.elapsed_secs());
         self.range.start + ((self.range.end - self.range.start) * amount)
     }
 }
